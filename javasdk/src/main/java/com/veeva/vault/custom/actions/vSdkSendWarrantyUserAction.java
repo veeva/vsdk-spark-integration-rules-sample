@@ -16,7 +16,7 @@ import java.util.List;
  * vSDK SPARK Send Warranty Record Action
  *
  * This record action is pushes a warranty record created in Vault to an
- * second Vault for processing via a message processor
+ * second claims Vault for processing via a message processor
  */
 @RecordActionInfo(label="Send Warranty", object="vsdk_warranty__c")
 public class vSdkSendWarrantyUserAction implements RecordAction {
@@ -63,6 +63,7 @@ public class vSdkSendWarrantyUserAction implements RecordAction {
         Message message = queueService.newMessage(queueName)
                 .setAttribute("object", objectName)
                 .setAttribute("event", recordEvent)
+                .setAttribute("integration_point", "receive_warranty__c")
                 .setMessageItems(vaultIds);
         PutMessageResponse response = queueService.putMessage(message);
 
