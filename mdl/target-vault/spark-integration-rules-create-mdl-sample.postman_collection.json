@@ -1,0 +1,98 @@
+{
+	"info": {
+		"_postman_id": "af2617cd-f5b0-4f68-bb7d-00439efc802a",
+		"name": "spark-integration-rules-create-mdl-sample",
+		"description": "You can use Create Integration Rules via the API in order to be able to use integration rules for Vault-to-Vault Spark integrations.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get Session ID - Username/Password",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"var jsonData = JSON.parse(responseBody);",
+							"postman.setGlobalVariable(\"session_id\", jsonData.sessionId);"
+						]
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "text"
+						},
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "https://{{server}}/api/{{version}}/auth",
+					"protocol": "https",
+					"host": [
+						"{{server}}"
+					],
+					"path": [
+						"api",
+						"{{version}}",
+						"auth"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Execute MDL (RECREATE) Integration rule warranty_int_rule_1__c",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8754373f-ac46-4526-8fa4-3a3b73051dda",
+						"exec": [
+							"tests[\"Status code is 200\"] = responseCode.code === 200;"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "{{session_id}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "RECREATE Integrationrule warranty_int_rule_1__c (\r\n\tlabel('Warranties'),\r\n\tactive(true),\r\n\tconnection('vsdk_connection_to_warranties'),\r\n\tFieldrule warranty_field_rule_1__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.source_record__c'),\r\n\t\tquery_object('vsdk_warranty__c'),\r\n\t\tquery_field('id')\t\r\n\t),\r\n\tFieldrule warranty_field_rule_2__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.warranty_holder__c'),\r\n\t\tquery_object('vsdk_warranty__c'),\r\n\t\tquery_field('customer_name__c')\r\n\t),\r\n\tFieldrule warranty_field_rule_3__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.start_date__c'),\r\n\t\tquery_object('vsdk_warranty__c'),\r\n\t\tquery_field('cover_start_date__c')\t\r\n\t),\r\n\tFieldrule warranty_field_rule_4__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.info__c'),\r\n\t\tfield_default('Created by Vault to Vault integration')\r\n\t),\r\n\tFieldrule warranty_field_rule_5__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.product_maker__c'),\r\n\t\tquery_object('vsdk_warranty__c'),\r\n\t\tquery_field('manufacturer__c'),\r\n\t\treference_lookup_type('object'),\r\n\t\treference_lookup('product_maker__c')\t\r\n\t),\r\n\tFieldrule warranty_field_rule_6__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.warranty_plus_cover__c'),\r\n\t\tquery_object('vsdk_warranty__c'),\r\n\t\tquery_field('extended_cover__c')\t\r\n\t),\r\n\tFieldrule warranty_field_rule_7__c (\r\n\t\ttarget_object('Object.vsdk_claims_warranty__c'),\r\n\t\ttarget_object_field('Field.duration__c'),\r\n\t\tquery_object('warranty_period__c'),\r\n\t\tquery_field('name__v')\r\n\t)\r\n);"
+				},
+				"url": {
+					"raw": "https://{{server}}/api/mdl/execute",
+					"protocol": "https",
+					"host": [
+						"{{server}}"
+					],
+					"path": [
+						"api",
+						"mdl",
+						"execute"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
