@@ -22,7 +22,6 @@
                 <updatePolicy>always</updatePolicy>
             </releases>
         </repository>
-       </repository>
        
     </repositories>
 
