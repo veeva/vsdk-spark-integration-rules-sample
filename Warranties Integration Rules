@@ -1,0 +1,49 @@
+RECREATE Integrationrule warranty_int_rule_1__c (
+	label('Warranties'),
+	active(true),
+	integration_point('receive_warranty__c'),
+	connection('vsdk_connection_to_warranties'),
+	Fieldrule warranty_field_rule_1__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.source_record__c'),
+		query_object('vsdk_warranty__c'),
+		query_field('id')
+	),
+	Fieldrule warranty_field_rule_2__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.warranty_holder__c'),
+		query_object('vsdk_warranty__c'),
+		query_field('customer_name__c')
+	),
+	Fieldrule warranty_field_rule_3__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.start_date__c'),
+		query_object('vsdk_warranty__c'),
+		query_field('cover_start_date__c')
+	),
+	Fieldrule warranty_field_rule_4__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.info__c'),
+		field_default('Created by Vault to Vault integration')
+	),
+	Fieldrule warranty_field_rule_5__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.product_maker__c'),
+		query_object('vsdk_warranty__c'),
+		query_field('manufacturer__c'),
+		reference_lookup_type('object'),
+		reference_lookup('product_maker__c')
+	),
+	Fieldrule warranty_field_rule_6__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.warranty_plus_cover__c'),
+		query_object('vsdk_warranty__c'),
+		query_field('extended_cover__c')
+	),
+	Fieldrule warranty_field_rule_7__c (
+		target_object('Object.vsdk_claims_warranty__c'),
+		target_object_field('Field.duration__c'),
+		query_object('warranty_period__c'),
+		query_field('name__v')
+	)
+);
