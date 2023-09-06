@@ -2,6 +2,7 @@ package com.veeva.vault.custom.udc;
 
 import com.veeva.vault.sdk.api.core.*;
 import com.veeva.vault.sdk.api.data.Record;
+import com.veeva.vault.sdk.api.data.RecordBatchSaveRequest;
 import com.veeva.vault.sdk.api.data.RecordService;
 import com.veeva.vault.sdk.api.http.HttpMethod;
 import com.veeva.vault.sdk.api.http.HttpRequest;
@@ -12,8 +13,7 @@ import com.veeva.vault.sdk.api.json.JsonArray;
 import com.veeva.vault.sdk.api.json.JsonData;
 import com.veeva.vault.sdk.api.json.JsonObject;
 import com.veeva.vault.sdk.api.json.JsonValueType;
-import com.veeva.vault.sdk.api.query.QueryResponse;
-import com.veeva.vault.sdk.api.query.QueryService;
+import com.veeva.vault.sdk.api.query.*;
 
 import java.time.LocalDate;
 import java.util.Collection;
@@ -41,7 +41,7 @@ import java.util.Map;
  *                vault for more data
  *
  *-----------------------------------------------------------------------------
- * Copyright (c) 2020 Veeva Systems Inc.  All Rights Reserved.
+ * Copyright (c) 2023 Veeva Systems Inc.  All Rights Reserved.
  *      This code is based on pre-existing content developed and
  *      owned by Veeva Systems Inc. and may only be used in connection
  *      with the deliverable with which it was provided to Customer.
@@ -119,31 +119,40 @@ public class vSDKIntRulesETLWarranties {
 
         Map<String,Record> etlMessageMap = VaultCollections.newMap();
 
-        // Query to see any incoming IDs match to any existing vsdk_claims_warranty__c records.
-        StringBuilder query = new StringBuilder();
-        query.append("SELECT id, source_record__c ");
-        query.append("FROM ").append(destinationObject).append(" ");
-        query.append("WHERE source_record__c contains ('" + String.join("','", incomingMessageList)  + "')");
+        Query query = queryService
+                .newQueryBuilder()
+                .withSelect(VaultCollections.asList("id", "source_record__c"))
+                .withFrom(destinationObject)
+                .withWhere("WHERE source_record__c contains ('" + String.join("','", incomingMessageList)  + "')")
+                .build();
 
-        QueryResponse queryResponse = queryService.query(query.toString());
+        QueryExecutionRequest queryExecutionRequest = queryService.newQueryExecutionRequestBuilder()
+                .withQuery(query)
+                .build();
+
+        QueryOperation<QueryExecutionResponse> queryOperation = queryService.query(queryExecutionRequest);
 
         logService.info("Query existing records by ID: " + query);
 
-        // Any records that already exist in the target Vault will be updated
-        queryResponse.streamResults().forEach(qr -> {
-            String id = qr.getValue("id", ValueType.STRING);
-            String source_id = qr.getValue("source_record__c", ValueType.STRING);
-            logService.info("Found existing record with ID: " + id);
+        queryOperation.onSuccess(queryExecutionResponse -> {
+                    queryExecutionResponse.streamResults().forEach(queryExecutionResult -> {
+                        String id = queryExecutionResult.getValue("id", ValueType.STRING);
+                        String source_id = queryExecutionResult.getValue("source_record__c", ValueType.STRING);
+                        logService.info("Found existing record with ID: " + id);
 
-            // Add the existing record for callback
-            Record recordUpdate = recordService.newRecordWithId(destinationObject, id);
-            etlMessageMap.put(source_id, recordUpdate);
+                        // Add the existing record for callback
+                        Record recordUpdate = recordService.newRecordWithId(destinationObject, id);
+                        etlMessageMap.put(source_id, recordUpdate);
 
-            // Remove the record from the incoming map so it doesn't get recreated
-            //incomingMessageMap.remove(source_id);
-            incomingMessageList.remove(source_id);
-        });
-        queryResponse = null;
+                        // Remove the record from the incoming map so it doesn't get recreated
+                        //incomingMessageMap.remove(source_id);
+                        incomingMessageList.remove(source_id);
+                    });
+                });
+            queryOperation.onError(queryOperationError -> {
+                logService.error("Failed to query records: " + queryOperationError.getMessage());
+            });
+            queryOperation.execute();
 
         // Add the new records to "etlMessageMap" for callback
         for (String key : incomingMessageList) {
@@ -390,43 +399,46 @@ public class vSDKIntRulesETLWarranties {
                         transformedRecordList.addAll(recordsToETL.values());
                         recordsToETL.clear();
 
-                        recordService.batchSaveRecords(transformedRecordList).onSuccesses(successMessage -> {
+                        RecordBatchSaveRequest recordBatchSaveRequest = recordService.newRecordBatchSaveRequestBuilder()
+                                                .withRecords(transformedRecordList)
+                                                .build();
 
-                            List<Record> successfulRecords = VaultCollections.newList();
-                            successMessage.stream().forEach(positionalRecordId -> {
-                                Record record = recordService.newRecordWithId(destinationObject,
-                                        positionalRecordId.getRecordId());
-                                successfulRecords.add(record);
-                            });
+                        recordService.batchSaveRecords(recordBatchSaveRequest)
+                                .onSuccesses(successMessage -> {
+                                    List<Record> successfulRecords = VaultCollections.newList();
+                                    successMessage.stream().forEach(positionalRecordId -> {
+                                        Record record = recordService.newRecordWithId(destinationObject,
+                                                positionalRecordId.getRecordId());
+                                        successfulRecords.add(record);
+                                    });
+                                })
+                                .onErrors(batchOperationErrors -> {
+                                    batchOperationErrors.stream().forEach(error -> {
+                                        String errMsg = error.getError().getMessage();
+                                        int errPosition = error.getInputPosition();
+                                        String sourceId = transformedRecordList.get(errPosition).getValue("source_record__c", ValueType.STRING);
 
-                        }).onErrors(batchOperationErrors -> {
-                            batchOperationErrors.stream().forEach(error -> {
-                                String errMsg = error.getError().getMessage();
-                                int errPosition = error.getInputPosition();
-                                String sourceId = transformedRecordList.get(errPosition).getValue("source_record__c", ValueType.STRING);
+                                        // Create a User Exception per record error, as each one may be different
+                                        //
+                                        // An example of when this error might occur would be if a mandatory field in the
+                                        // target object wasn't populated.
+                                        StringBuilder logMessage = new StringBuilder();
+                                        logMessage.append("Unable to create '").append(transformedRecordList.get(errPosition).getObjectName())
+                                                .append("' record, because of '").append(errMsg).append("'.");
 
-                                // Create a User Exception per record error, as each one may be different
-                                //
-                                // An example of when this error might occur would be if a mandatory field in the
-                                // target object wasn't populated.
-                                StringBuilder logMessage = new StringBuilder();
-                                logMessage.append("Unable to create '").append(transformedRecordList.get(errPosition).getObjectName())
-                                        .append("' record, because of '").append(errMsg).append("'.");
+                                        vSDKSparkHelper.createUserExceptionMessage(
+                                                integrationApiName,
+                                                integrationPointApiName,
+                                                logMessage.toString(),
+                                                "vSDKIntRulesETLWarranties",
+                                                sourceId);
 
-                                vSDKSparkHelper.createUserExceptionMessage(
-                                        integrationApiName,
-                                        integrationPointApiName,
-                                        logMessage.toString(),
-                                        "vSDKIntRulesETLWarranties",
-                                        sourceId);
-
-                                // Move the failed record from the successful to failed list
-                                successfulIdList.remove(sourceId);
-                                failedIdList.add(sourceId);
-
-                            });
-                        }).execute();
-
+                                        // Move the failed record from the successful to failed list
+                                        successfulIdList.remove(sourceId);
+                                        failedIdList.add(sourceId);
+                                    });
+                                })
+                                .execute();
                     }
 
                     // Update the source system to say whether records have updated successfully or not,

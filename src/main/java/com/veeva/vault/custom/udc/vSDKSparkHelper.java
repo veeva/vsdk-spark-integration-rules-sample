@@ -2,14 +2,14 @@ package com.veeva.vault.custom.udc;
 
 import com.veeva.vault.sdk.api.core.*;
 import com.veeva.vault.sdk.api.data.Record;
+import com.veeva.vault.sdk.api.data.RecordBatchSaveRequest;
 import com.veeva.vault.sdk.api.data.RecordService;
 import com.veeva.vault.sdk.api.http.HttpMethod;
 import com.veeva.vault.sdk.api.http.HttpRequest;
 import com.veeva.vault.sdk.api.http.HttpResponseBodyValueType;
 import com.veeva.vault.sdk.api.http.HttpService;
 import com.veeva.vault.sdk.api.json.*;
-import com.veeva.vault.sdk.api.query.QueryResponse;
-import com.veeva.vault.sdk.api.query.QueryService;
+import com.veeva.vault.sdk.api.query.*;
 import com.veeva.vault.sdk.api.queue.Message;
 import com.veeva.vault.sdk.api.queue.PutMessageResponse;
 import com.veeva.vault.sdk.api.queue.PutMessageResult;
@@ -25,7 +25,7 @@ import java.util.List;
  * Description: Useful Methods to help with Spark Integration between Vaults
  *
  *-----------------------------------------------------------------------------
- * Copyright (c) 2020 Veeva Systems Inc.  All Rights Reserved.
+ * Copyright (c) 2023 Veeva Systems Inc.  All Rights Reserved.
  *
  * This code is based on pre-existing content developed and
  * owned by Veeva Systems Inc. and may only be used in connection
@@ -45,14 +45,31 @@ public class vSDKSparkHelper {
      */
     public static boolean isIntegrationActive(String integrationName) {
         QueryService queryService = ServiceLocator.locate(QueryService.class);
-        StringBuilder query = new StringBuilder();
-        query.append("SELECT id, name__v, status__v ");
-        query.append("FROM integration__sys ");
-        query.append("WHERE name__v = '").append(integrationName).append("' ");
-        query.append("AND status__v = 'active__v' ");
-        QueryResponse integration = queryService.query(query.toString());
+        LogService logService = ServiceLocator.locate(LogService.class);
+        List<Integer> recordCount = VaultCollections.newList();
 
-        if (integration.getResultCount() == 0) {
+        Query query = queryService
+                .newQueryBuilder()
+                .withSelect(VaultCollections.asList("id", "name__v", "status__v"))
+                .withFrom("integration__sys")
+                .withWhere("name__v = '" + integrationName + "'")
+                .appendWhere(QueryLogicalOperator.AND, "status__v = 'active__v'")
+                .build();
+
+        QueryCountRequest queryCountRequest  = queryService
+                .newQueryCountRequestBuilder()
+                .withQuery(query)
+                .build();
+        queryService.count(queryCountRequest)
+                .onSuccess(queryResponse -> {
+                    recordCount.add((int)queryResponse.getTotalCount());
+                })
+                .onError(queryOperationError -> {
+                    logService.error("Failed to query records: " + queryOperationError.getMessage());
+                })
+                .execute();
+
+        if (recordCount.get(0) == 0) {
             return false;
         } else {
             return true;
@@ -94,9 +111,24 @@ public class vSDKSparkHelper {
         recordsToSave.add(userExceptionMessage);
 
         // Save the User Exception
-       recordService.batchSaveRecords(recordsToSave)
-               .rollbackOnErrors()
-               .execute();
+        if (!recordsToSave.isEmpty()) {
+            RecordBatchSaveRequest recordBatchSaveRequest = recordService.newRecordBatchSaveRequestBuilder()
+                    .withRecords(recordsToSave)
+                    .build();
+
+            recordService.batchSaveRecords(recordBatchSaveRequest)
+                    .onErrors(batchOperationErrors -> {
+                        batchOperationErrors.stream().findFirst().ifPresent(error -> {
+                            String errMsg = error.getError().getMessage();
+                            int errPosition = error.getInputPosition();
+                            String name = recordsToSave.get(errPosition).getValue("name__v", ValueType.STRING);
+                            logService.error("Unable to create '" + recordsToSave.get(errPosition).getObjectName() + "' record: '" +
+                                    name + "' because of '" + errMsg + "'.");
+                        });
+                    })
+                    .rollbackOnErrors()
+                    .execute();
+        }
 
         StringBuilder logMessage = new StringBuilder();
         logMessage.append("Created User exception message: ").append(errorMessage);
@@ -110,15 +142,32 @@ public class vSDKSparkHelper {
      */
     public static String getIntegrationId(String integrationAPIName) {
         QueryService queryService = ServiceLocator.locate(QueryService.class);
-        StringBuilder query = new StringBuilder();
-        query.append("SELECT id ");
-        query.append("FROM integration__sys ");
-        query.append("WHERE integration_api_name__sys = '").append(integrationAPIName).append("'");
-        QueryResponse intQueryResponse = queryService.query(query.toString());
+        LogService logService = ServiceLocator.locate(LogService.class);
         List<String> ids = VaultCollections.newList();
-        intQueryResponse.streamResults().forEach(qr -> {
-            ids.add(qr.getValue("id", ValueType.STRING));
+
+        Query query = queryService
+                .newQueryBuilder()
+                .withSelect(VaultCollections.asList("id"))
+                .withFrom("integration__sys")
+                .withWhere("integration_api_name__sys = '" + integrationAPIName + "'")
+                .build();
+
+        QueryExecutionRequest queryExecutionRequest = queryService.newQueryExecutionRequestBuilder()
+                .withQuery(query)
+                .build();
+
+        QueryOperation<QueryExecutionResponse> queryOperation = queryService.query(queryExecutionRequest);
+
+        queryOperation.onSuccess(queryExecutionResponse -> {
+            queryExecutionResponse.streamResults().forEach(queryExecutionResult -> {
+                ids.add(queryExecutionResult.getValue("id", ValueType.STRING));
+            });
         });
+        queryOperation.onError(queryOperationError -> {
+            logService.error("Failed to query records: " + queryOperationError.getMessage());
+        });
+        queryOperation.execute();
+
         return ids.get(0);
     }
 
@@ -128,16 +177,33 @@ public class vSDKSparkHelper {
      * @param integrationPointAPIName of the integration
      */
     public static String getIntegrationPointId(String integrationPointAPIName) {
+        LogService logService = ServiceLocator.locate(LogService.class);
         QueryService queryService = ServiceLocator.locate(QueryService.class);
-        StringBuilder query = new StringBuilder();
-        query.append("SELECT id ");
-        query.append("FROM integration_point__sys ");
-        query.append("WHERE integration_point_api_name__sys = '").append(integrationPointAPIName).append("'");
-        QueryResponse intQueryResponse = queryService.query(query.toString());
         List<String> ids = VaultCollections.newList();
-        intQueryResponse.streamResults().forEach(qr -> {
-            ids.add(qr.getValue("id", ValueType.STRING));
+
+        Query query = queryService
+                .newQueryBuilder()
+                .withSelect(VaultCollections.asList("id"))
+                .withFrom("integration_point__sys")
+                .withWhere("integration_point_api_name__sys = '" + integrationPointAPIName + "'")
+                .build();
+
+        QueryExecutionRequest queryExecutionRequest = queryService.newQueryExecutionRequestBuilder()
+                .withQuery(query)
+                .build();
+
+        QueryOperation<QueryExecutionResponse> queryOperation = queryService.query(queryExecutionRequest);
+
+        queryOperation.onSuccess(queryExecutionResponse -> {
+            queryExecutionResponse.streamResults().forEach(queryExecutionResult -> {
+                ids.add(queryExecutionResult.getValue("id", ValueType.STRING));
+            });
         });
+        queryOperation.onError(queryOperationError -> {
+            logService.error("Failed to query records: " + queryOperationError.getMessage());
+        });
+        queryOperation.execute();
+
         return ids.get(0);
     }
 
@@ -147,16 +213,33 @@ public class vSDKSparkHelper {
      * @param connectionAPIName of the integration
      */
     public static String getConnectionId(String connectionAPIName) {
+        LogService logService = ServiceLocator.locate(LogService.class);
         QueryService queryService = ServiceLocator.locate(QueryService.class);
-        StringBuilder query = new StringBuilder();
-        query.append("SELECT id ");
-        query.append("FROM connection__sys ");
-        query.append("WHERE api_name__sys = '").append(connectionAPIName).append("'");
-        QueryResponse intQueryResponse = queryService.query(query.toString());
         List<String> ids = VaultCollections.newList();
-        intQueryResponse.streamResults().forEach(qr -> {
-            ids.add(qr.getValue("id", ValueType.STRING));
+
+        Query query = queryService
+                .newQueryBuilder()
+                .withSelect(VaultCollections.asList("id"))
+                .withFrom("connection__sys")
+                .withWhere("api_name__sys = '" + connectionAPIName + "'")
+                .build();
+
+        QueryExecutionRequest queryExecutionRequest = queryService.newQueryExecutionRequestBuilder()
+                .withQuery(query)
+                .build();
+
+        QueryOperation<QueryExecutionResponse> queryOperation = queryService.query(queryExecutionRequest);
+
+        queryOperation.onSuccess(queryExecutionResponse -> {
+            queryExecutionResponse.streamResults().forEach(queryExecutionResult -> {
+                ids.add(queryExecutionResult.getValue("id", ValueType.STRING));
+            });
         });
+        queryOperation.onError(queryOperationError -> {
+            logService.error("Failed to query records: " + queryOperationError.getMessage());
+        });
+        queryOperation.execute();
+
         return ids.get(0);
     }
 
@@ -461,28 +544,38 @@ public class vSDKSparkHelper {
             logService.info("connectionId: " + connectionId);
             logService.info("integrationPointAPIName: " + targetIntegrationPointAPIName);
 
-            // Query to see if any intTransactions already exist in pending state
-            StringBuilder query = new StringBuilder();
-            query.append("SELECT source_key__c ");
-            query.append("FROM integration_transaction__c ");
-            query.append("WHERE source_key__c contains ('" + String.join("','", vaultIds)  + "') ");
-            query.append("AND source_object__c = '").append(objectName).append("' ");
-            query.append("AND connection__c = '").append(connectionId).append("' ");
-            query.append("AND target_integration_point__c = '").append(targetIntegrationPointAPIName).append("' ");
-            query.append("AND transaction_status__c = 'pending__c'");
+            Query query = queryService
+                    .newQueryBuilder()
+                    .withSelect(VaultCollections.asList("source_key__c"))
+                    .withFrom("integration_transaction__c")
+                    .withWhere("source_key__c contains ('" + String.join("','", vaultIds) + "') ")
+                    .appendWhere(QueryLogicalOperator.AND, "source_object__c = '" + objectName + "' ")
+                    .appendWhere(QueryLogicalOperator.AND, "connection__c = '" + connectionId + "' ")
+                    .appendWhere(QueryLogicalOperator.AND, "target_integration_point__c = '" + targetIntegrationPointAPIName + "' ")
+                    .appendWhere(QueryLogicalOperator.AND, "transaction_status__c = 'pending__c' ")
+                    .build();
 
-            QueryResponse queryResponse = queryService.query(query.toString());
+            QueryExecutionRequest queryExecutionRequest = queryService.newQueryExecutionRequestBuilder()
+                    .withQuery(query)
+                    .build();
+
+            QueryOperation<QueryExecutionResponse> queryOperation = queryService.query(queryExecutionRequest);
 
             logService.info("Query existing pending integration transactions by ID: " + query);
 
             // Any pending integration transactions records that already exist will be removed from the list
             // so they don't get recreated
-            queryResponse.streamResults().forEach(qr -> {
-                String source_key__c = qr.getValue("source_key__c", ValueType.STRING);
-                logService.info("Found existing pending record with Source Key: " + source_key__c);
-                vaultIds.remove(source_key__c);
+            queryOperation.onSuccess(queryExecutionResponse -> {
+                queryExecutionResponse.streamResults().forEach(queryExecutionResult -> {
+                    String source_key__c = queryExecutionResult.getValue("source_key__c", ValueType.STRING);
+                    logService.info("Found existing pending record with Source Key: " + source_key__c);
+                    vaultIds.remove(source_key__c);
+                });
             });
-            queryResponse = null;
+            queryOperation.onError(queryOperationError -> {
+                logService.error("Failed to query records: " + queryOperationError.getMessage());
+            });
+            queryOperation.execute();
 
             for (Object vaultId : vaultIds) {
 
@@ -512,9 +605,12 @@ public class vSDKSparkHelper {
 
         // Save the Integration Transactions for the connection
         if (intTransactionsToSave.size() > 0) {
-            recordService.batchSaveRecords(intTransactionsToSave)
-                    .onErrors(batchOperationErrors -> {
+            RecordBatchSaveRequest recordBatchSaveRequest = recordService.newRecordBatchSaveRequestBuilder()
+                    .withRecords(intTransactionsToSave)
+                    .build();
 
+            recordService.batchSaveRecords(recordBatchSaveRequest)
+                    .onErrors(batchOperationErrors -> {
                         //Iterate over the caught errors.
                         //The BatchOperation.onErrors() returns a list of BatchOperationErrors.
                         //The list can then be traversed to retrieve a single BatchOperationError and
@@ -535,6 +631,29 @@ public class vSDKSparkHelper {
                         });
                     })
                     .execute();
+//            recordService.batchSaveRecords(intTransactionsToSave)
+//                    .onErrors(batchOperationErrors -> {
+//
+//                        //Iterate over the caught errors.
+//                        //The BatchOperation.onErrors() returns a list of BatchOperationErrors.
+//                        //The list can then be traversed to retrieve a single BatchOperationError and
+//                        //then extract an **ErrorResult** with BatchOperationError.getError().
+//                        batchOperationErrors.stream().findFirst().ifPresent(error -> {
+//                            String errMsg = error.getError().getMessage();
+//                            int errPosition = error.getInputPosition();
+//                            StringBuilder err = new StringBuilder();
+//                            String name = intTransactionsToSave.get(errPosition).getValue("source_key__c", ValueType.STRING);
+//                            err.append("Unable to create '")
+//                                    .append(intTransactionsToSave.get(errPosition).getObjectName())
+//                                    .append("' record: '")
+//                                    .append(name)
+//                                    .append("' because of '")
+//                                    .append(errMsg)
+//                                    .append("'.");
+//                            throw new RollbackException("OPERATION_NOT_ALLOWED", err.toString());
+//                        });
+//                    })
+//                    .execute();
 
             StringBuilder logMessage = new StringBuilder();
             logMessage.append("Created Integration Transaction for integration point : ").append(targetIntegrationPointAPIName).append(".");
