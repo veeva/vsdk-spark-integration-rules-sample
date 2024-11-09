@@ -4,10 +4,7 @@ import com.veeva.vault.sdk.api.core.*;
 import com.veeva.vault.sdk.api.data.Record;
 import com.veeva.vault.sdk.api.data.RecordBatchSaveRequest;
 import com.veeva.vault.sdk.api.data.RecordService;
-import com.veeva.vault.sdk.api.http.HttpMethod;
-import com.veeva.vault.sdk.api.http.HttpRequest;
-import com.veeva.vault.sdk.api.http.HttpResponseBodyValueType;
-import com.veeva.vault.sdk.api.http.HttpService;
+import com.veeva.vault.sdk.api.http.*;
 import com.veeva.vault.sdk.api.json.*;
 import com.veeva.vault.sdk.api.query.*;
 import com.veeva.vault.sdk.api.queue.Message;
@@ -279,16 +276,17 @@ public class vSDKSparkHelper {
         logService.info(logMessage.toString());
 
         //This is a vault to vault Http Request to the source connection
-        HttpService httpService = ServiceLocator.locate(HttpService.class);
-        HttpRequest request = httpService.newHttpRequest(connectionName);
-
         //The configured connection provides the full DNS name.
         //For the path, you only need to append the API endpoint after the DNS.
         //The query endpoint takes a POST where the BODY is the query itself.
-        request.setMethod(HttpMethod.POST);
-        request.appendPath("/api/v19.3/query");
-        request.setHeader("Content-Type", "application/x-www-form-urlencoded");
-        request.setBodyParam("q", query.toString());
+        HttpService httpService = ServiceLocator.locate(HttpService.class);
+        FormHttpRequest request = httpService.newHttpRequestBuilder()
+                .withConnectionName(connectionName)
+                .withMethod(HttpMethod.POST)
+                .withPath("/api/v24.2/query")
+                .withHeader("Content-Type", "application/x-www-form-urlencoded")
+                .withBodyParam("q", query.toString())
+                .build();
 
         //Send the request to the source vault via a callback. The response received back should be a JSON response.
         //First, the response is parsed into a `JsonData` object
@@ -297,7 +295,7 @@ public class vSDKSparkHelper {
         //The `data` element is an array of JSON data. This is parsed into a `JsonArray` object.
         //    * Each queried record is returned as an element of the array and must be parsed into a `JsonObject`.
         //    * Individual fields can then be retrieved from each `JsonObject` that is in the `JsonArray`.
-        httpService.send(request, HttpResponseBodyValueType.JSONDATA)
+        httpService.sendRequest(request, HttpResponseBodyValueType.JSONDATA)
                 .onSuccess(httpResponse -> {
 
                     JsonData response = httpResponse.getResponseBody();
@@ -364,18 +362,19 @@ public class vSDKSparkHelper {
         logService.info(logMessage.toString());
 
         //This is a vault to vault Http Request to the source connection
-        HttpService httpService = ServiceLocator.locate(HttpService.class);
-        HttpRequest request = httpService.newHttpRequest(connectionName);
-
         //The configured connection provides the full DNS name.
         //For the path, you only need to append the API endpoint after the DNS.
         //The query endpoint takes a POST where the BODY is the query itself.
-        request.setMethod(HttpMethod.POST);
-        request.appendPath("/api/v19.3/query");
-        request.setHeader("Content-Type", "application/x-www-form-urlencoded");
-        request.setBodyParam("q", query.toString());
+        HttpService httpService = ServiceLocator.locate(HttpService.class);
+        FormHttpRequest request = httpService.newHttpRequestBuilder()
+                .withConnectionName(connectionName)
+                .withMethod(HttpMethod.POST)
+                .withPath("/api/v24.2/query")
+                .withHeader("Content-Type", "application/x-www-form-urlencoded")
+                .withBodyParam("q", query.toString())
+                .build();
 
-        httpService.send(request, HttpResponseBodyValueType.JSONDATA)
+        httpService.sendRequest(request, HttpResponseBodyValueType.JSONDATA)
                 .onSuccess(httpResponse -> {
 
                     JsonData response = httpResponse.getResponseBody();
@@ -447,7 +446,8 @@ public class vSDKSparkHelper {
                 objectName,
                 targetIntegrationPoint);
 
-        HttpRequest request = httpService.newHttpRequest(connectionName);
+        FormHttpRequest.Builder formBuilder = httpService.newHttpRequestBuilder()
+                .withConnectionName(connectionName);
 
         JsonService jsonService = ServiceLocator.locate(JsonService.class);
         JsonObjectBuilder jsonObjectBuilder = jsonService.newJsonObjectBuilder();
@@ -469,12 +469,14 @@ public class vSDKSparkHelper {
         JsonArray inputJsonArray = jsonArrayBuilder.build();
 
         if (inputJsonArray.getSize() > 0) {
-            request.setMethod(HttpMethod.PUT);
-            request.appendPath("/api/v19.1/vobjects/integration_transaction__c");
-            request.setHeader("Content-Type", "application/json");
-            request.setBody(inputJsonArray);
+            FormHttpRequest request = formBuilder
+                    .withMethod(HttpMethod.PUT)
+                    .withPath("/api/v24.2/vobjects/integration_transaction__c")
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(inputJsonArray)
+                    .build();
 
-            httpService.send(request, HttpResponseBodyValueType.JSONDATA)
+            httpService.sendRequest(request, HttpResponseBodyValueType.JSONDATA)
                     .onSuccess(httpResponse -> {
 
                         JsonData response = httpResponse.getResponseBody();

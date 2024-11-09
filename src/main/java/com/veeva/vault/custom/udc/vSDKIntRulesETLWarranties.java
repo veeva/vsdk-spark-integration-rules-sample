@@ -4,10 +4,7 @@ import com.veeva.vault.sdk.api.core.*;
 import com.veeva.vault.sdk.api.data.Record;
 import com.veeva.vault.sdk.api.data.RecordBatchSaveRequest;
 import com.veeva.vault.sdk.api.data.RecordService;
-import com.veeva.vault.sdk.api.http.HttpMethod;
-import com.veeva.vault.sdk.api.http.HttpRequest;
-import com.veeva.vault.sdk.api.http.HttpResponseBodyValueType;
-import com.veeva.vault.sdk.api.http.HttpService;
+import com.veeva.vault.sdk.api.http.*;
 import com.veeva.vault.sdk.api.integration.*;
 import com.veeva.vault.sdk.api.json.JsonArray;
 import com.veeva.vault.sdk.api.json.JsonData;
@@ -250,17 +247,18 @@ public class vSDKIntRulesETLWarranties {
                     logService.info("Callback query: " + query.toString());
 
                     //This is a vault to vault Http Request to the connection i.e. `vsdk_connection_to_warranties`
-                    HttpService httpService = ServiceLocator.locate(HttpService.class);
-                    HttpRequest request = httpService.newHttpRequest(connectionName);
-
                     //The configured connection provides the full DNS name.
                     //For the path, you only need to append the API endpoint after the DNS.
                     //The query endpoint takes a POST where the BODY is the query itself.
-                    request.setMethod(HttpMethod.POST);
-                    request.appendPath("/api/v20.1/query");
-                    request.setHeader("Content-Type", "application/x-www-form-urlencoded");
-                    request.setHeader("X-VaultAPI-DescribeQuery", "true"); // *** New
-                    request.setBodyParam("q", query.toString());
+                    HttpService httpService = ServiceLocator.locate(HttpService.class);
+                    FormHttpRequest request = httpService.newHttpRequestBuilder()
+                            .withConnectionName(connectionName)
+                            .withMethod(HttpMethod.POST)
+                            .withPath("/api/v24.2/query")
+                            .withHeader("Content-Type", "application/x-www-form-urlencoded")
+                            .withHeader("X-VaultAPI-DescribeQuery", "true")
+                            .withBodyParam("q", query.toString())
+                            .build();
 
                     //Send the request the source vault via a callback. The response received back should be a JSON response.
                     //First, the response is parsed into a `JsonData` object
@@ -269,7 +267,7 @@ public class vSDKIntRulesETLWarranties {
                     //The `data` element is an array of JSON data. This is parsed into a `JsonArray` object.
                     //    * Each queried record is returned as an element of the array and must be parsed into a `JsonObject`.
                     //    * Individual fields can then be retrieved from each `JsonObject` that is in the `JsonArray`.
-                    httpService.send(request, HttpResponseBodyValueType.JSONDATA)
+                    httpService.sendRequest(request, HttpResponseBodyValueType.JSONDATA)
                             .onSuccess(httpResponse -> {
 
                                 JsonData response = httpResponse.getResponseBody();
