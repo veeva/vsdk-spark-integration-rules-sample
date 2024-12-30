@@ -633,29 +633,6 @@ public class vSDKSparkHelper {
                         });
                     })
                     .execute();
-//            recordService.batchSaveRecords(intTransactionsToSave)
-//                    .onErrors(batchOperationErrors -> {
-//
-//                        //Iterate over the caught errors.
-//                        //The BatchOperation.onErrors() returns a list of BatchOperationErrors.
-//                        //The list can then be traversed to retrieve a single BatchOperationError and
-//                        //then extract an **ErrorResult** with BatchOperationError.getError().
-//                        batchOperationErrors.stream().findFirst().ifPresent(error -> {
-//                            String errMsg = error.getError().getMessage();
-//                            int errPosition = error.getInputPosition();
-//                            StringBuilder err = new StringBuilder();
-//                            String name = intTransactionsToSave.get(errPosition).getValue("source_key__c", ValueType.STRING);
-//                            err.append("Unable to create '")
-//                                    .append(intTransactionsToSave.get(errPosition).getObjectName())
-//                                    .append("' record: '")
-//                                    .append(name)
-//                                    .append("' because of '")
-//                                    .append(errMsg)
-//                                    .append("'.");
-//                            throw new RollbackException("OPERATION_NOT_ALLOWED", err.toString());
-//                        });
-//                    })
-//                    .execute();
 
             StringBuilder logMessage = new StringBuilder();
             logMessage.append("Created Integration Transaction for integration point : ").append(targetIntegrationPointAPIName).append(".");
